@@ -1,0 +1,490 @@
+{
+  "info": {
+    "name": "USI Money / RemitONE Direct API",
+    "description": "Direct calls to the USI Money (RemitONE) Agent Partner WebServices, useful for debugging and SOC/pen-test reproduction. Every request is a POST with application/x-www-form-urlencoded body.\n\nA collection-level pre-request script automatically injects `username`, `password`, `pin` from collection variables, and (if `dataIntegrityKey` is set) computes the SHA-256 `data_integrity_hash` per the spec — concatenating all POST params except username/password/pin/id1_scan/id2_scan, then appending the integrity key.\n\nDO NOT paste real production credentials into the variables. Use a dedicated Postman environment file checked into a private store, or override at runtime.\n\nBase URL pattern: `{{baseUrl}}/<group>/<method>`. Example for the test environment:\n  https://test4.remit.by/universalsecuritiestest/ws",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "9d1f2c0e-1a4a-4f8a-9bd0-000000000002"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://test4.remit.by/universalsecuritiestest/ws", "type": "string" },
+    { "key": "username", "value": "", "type": "string" },
+    { "key": "password", "value": "", "type": "string" },
+    { "key": "pin", "value": "", "type": "string" },
+    { "key": "dataIntegrityKey", "value": "", "type": "string" },
+    { "key": "remitterId", "value": "10005", "type": "string" },
+    { "key": "beneficiaryId", "value": "11", "type": "string" },
+    { "key": "transRef", "value": "RA000263000102", "type": "string" },
+    { "key": "agentTransRef", "value": "AGT-TEST-001", "type": "string" },
+    { "key": "transSessionId", "value": "830016270356710161", "type": "string" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-inject credentials and (optionally) data_integrity_hash for every request.",
+          "// Per USI spec the hash is SHA-256 of: concat(all POST params except username/password/pin/id1_scan/id2_scan/data_integrity_hash) + dataIntegrityKey.",
+          "",
+          "const username = pm.collectionVariables.get('username');",
+          "const password = pm.collectionVariables.get('password');",
+          "const pin = pm.collectionVariables.get('pin');",
+          "const integrityKey = pm.collectionVariables.get('dataIntegrityKey');",
+          "",
+          "if (!pm.request.body || pm.request.body.mode !== 'urlencoded') return;",
+          "",
+          "// urlencoded fields are exposed as a Postman list; mutate via add()/upsert().",
+          "function setField(name, value) {",
+          "  if (value == null || value === '') return;",
+          "  const existing = pm.request.body.urlencoded.find(f => f.key === name);",
+          "  if (existing) existing.value = String(value);",
+          "  else pm.request.body.urlencoded.add({ key: name, value: String(value), type: 'text' });",
+          "}",
+          "",
+          "function removeField(name) {",
+          "  const idx = pm.request.body.urlencoded.findIndex(f => f.key === name);",
+          "  if (idx >= 0) pm.request.body.urlencoded.remove(idx);",
+          "}",
+          "",
+          "setField('username', username);",
+          "setField('password', password);",
+          "setField('pin', pin);",
+          "removeField('data_integrity_hash');",
+          "",
+          "if (integrityKey && integrityKey.length > 0) {",
+          "  const exclude = new Set(['username', 'password', 'pin', 'id1_scan', 'id2_scan', 'data_integrity_hash']);",
+          "  let concat = '';",
+          "  pm.request.body.urlencoded.each((field) => {",
+          "    if (field.disabled) return;",
+          "    if (exclude.has(field.key)) return;",
+          "    if (field.value == null) return;",
+          "    concat += String(field.value);",
+          "  });",
+          "  // CryptoJS is bundled with Postman.",
+          "  const hash = CryptoJS.SHA256(concat + integrityKey).toString(CryptoJS.enc.Hex);",
+          "  setField('data_integrity_hash', hash);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Agent",
+      "item": [
+        {
+          "name": "POST /agent/getAgentDetails",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/agent/getAgentDetails", "host": ["{{baseUrl}}"], "path": ["agent", "getAgentDetails"] },
+            "body": { "mode": "urlencoded", "urlencoded": [] }
+          }
+        },
+        {
+          "name": "POST /agent/getCurrentCredit",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/agent/getCurrentCredit", "host": ["{{baseUrl}}"], "path": ["agent", "getCurrentCredit"] },
+            "body": { "mode": "urlencoded", "urlencoded": [] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Country",
+      "item": [
+        {
+          "name": "POST /country/getDestinationCountries",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/country/getDestinationCountries", "host": ["{{baseUrl}}"], "path": ["country", "getDestinationCountries"] },
+            "body": { "mode": "urlencoded", "urlencoded": [] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rates",
+      "item": [
+        {
+          "name": "POST /rates/getRates",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/rates/getRates", "host": ["{{baseUrl}}"], "path": ["rates", "getRates"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "dest_country", "value": "India", "type": "text" },
+                { "key": "source_currency", "value": "GBP", "type": "text", "disabled": true },
+                { "key": "dest_currency", "value": "INR", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Remitter",
+      "item": [
+        {
+          "name": "POST /remitter/createRemitter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/remitter/createRemitter", "host": ["{{baseUrl}}"], "path": ["remitter", "createRemitter"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "firstname", "value": "Test", "type": "text" },
+                { "key": "lastname", "value": "Remitter", "type": "text" },
+                { "key": "type", "value": "registered", "type": "text" },
+                { "key": "nationality", "value": "GB", "type": "text" },
+                { "key": "gender", "value": "Male", "type": "text" },
+                { "key": "status", "value": "valid", "type": "text" },
+                { "key": "address1", "value": "56 Wilmers Close", "type": "text" },
+                { "key": "city", "value": "London", "type": "text" },
+                { "key": "postcode", "value": "E20 6LD", "type": "text" },
+                { "key": "mobile", "value": "+443823484", "type": "text" },
+                { "key": "dob", "value": "1990-01-01", "type": "text" },
+                { "key": "id_type", "value": "Passport", "type": "text" },
+                { "key": "id_details", "value": "P12345678", "type": "text" },
+                { "key": "id_expiry", "value": "2030-12-31", "type": "text" },
+                { "key": "orgtype", "value": "Individual", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /remitter/searchRemitter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/remitter/searchRemitter", "host": ["{{baseUrl}}"], "path": ["remitter", "searchRemitter"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "remitter_id", "value": "{{remitterId}}", "type": "text" },
+                { "key": "show_scans", "value": "false", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /remitter/updateRemitter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/remitter/updateRemitter", "host": ["{{baseUrl}}"], "path": ["remitter", "updateRemitter"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "remitter_id", "value": "{{remitterId}}", "type": "text" },
+                { "key": "firstname", "value": "Test", "type": "text" },
+                { "key": "lastname", "value": "Remitter", "type": "text" },
+                { "key": "type", "value": "registered", "type": "text" },
+                { "key": "nationality", "value": "GB", "type": "text" },
+                { "key": "status", "value": "valid", "type": "text" },
+                { "key": "address1", "value": "56 Wilmers Close", "type": "text" },
+                { "key": "city", "value": "London", "type": "text" },
+                { "key": "state", "value": "London", "type": "text" },
+                { "key": "postcode", "value": "E20 6LD", "type": "text" },
+                { "key": "mobile", "value": "+443823484", "type": "text" },
+                { "key": "dob", "value": "1990-01-01", "type": "text" },
+                { "key": "country_of_birth", "value": "GB", "type": "text" },
+                { "key": "id_type", "value": "Passport", "type": "text" },
+                { "key": "id_details", "value": "P12345678", "type": "text" },
+                { "key": "id_expiry", "value": "2030-12-31", "type": "text" },
+                { "key": "id_verified", "value": "VERIFIED", "type": "text" },
+                { "key": "orgtype", "value": "Individual", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /remitter/verifyRemitter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/remitter/verifyRemitter", "host": ["{{baseUrl}}"], "path": ["remitter", "verifyRemitter"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "remitter_id", "value": "{{remitterId}}", "type": "text" },
+                { "key": "agent_name", "value": "AGENT_CODE", "type": "text" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Beneficiary",
+      "item": [
+        {
+          "name": "POST /beneficiary/getBeneficiaryAccountTypes",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/beneficiary/getBeneficiaryAccountTypes", "host": ["{{baseUrl}}"], "path": ["beneficiary", "getBeneficiaryAccountTypes"] },
+            "body": { "mode": "urlencoded", "urlencoded": [] }
+          }
+        },
+        {
+          "name": "POST /beneficiary/createBeneficiary",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/beneficiary/createBeneficiary", "host": ["{{baseUrl}}"], "path": ["beneficiary", "createBeneficiary"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "name", "value": "TEST BENEFICIARY", "type": "text" },
+                { "key": "fname", "value": "TEST", "type": "text" },
+                { "key": "lname", "value": "BENEFICIARY", "type": "text" },
+                { "key": "organisation_type", "value": "INDIVIDUAL", "type": "text" },
+                { "key": "address1", "value": "34 Test Road", "type": "text" },
+                { "key": "city", "value": "Mumbai", "type": "text" },
+                { "key": "country", "value": "India", "type": "text" },
+                { "key": "mobile", "value": "+919999999999", "type": "text" },
+                { "key": "linked_member_id", "value": "10005", "type": "text" },
+                { "key": "account_number", "value": "123456789", "type": "text" },
+                { "key": "bank", "value": "Test Proc Bank India", "type": "text" },
+                { "key": "benef_bank_ifsc_code", "value": "PUNB0999900", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /beneficiary/searchBeneficiary",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/beneficiary/searchBeneficiary", "host": ["{{baseUrl}}"], "path": ["beneficiary", "searchBeneficiary"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "linked_remitter_id", "value": "{{remitterId}}", "type": "text" },
+                { "key": "beneficiary_id", "value": "{{beneficiaryId}}", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /beneficiary/updateBeneficiary",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/beneficiary/updateBeneficiary", "host": ["{{baseUrl}}"], "path": ["beneficiary", "updateBeneficiary"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "beneficiary_id", "value": "{{beneficiaryId}}", "type": "text" },
+                { "key": "city", "value": "Bengaluru", "type": "text" },
+                { "key": "country", "value": "India", "type": "text" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transaction",
+      "item": [
+        {
+          "name": "POST /transaction/createTransaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/transaction/createTransaction", "host": ["{{baseUrl}}"], "path": ["transaction", "createTransaction"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "remitter_id", "value": "{{remitterId}}", "type": "text" },
+                { "key": "beneficiary_id", "value": "{{beneficiaryId}}", "type": "text" },
+                { "key": "destination_country", "value": "India", "type": "text" },
+                { "key": "agent_trans_ref", "value": "{{agentTransRef}}", "type": "text" },
+                { "key": "trans_type", "value": "Cash Collection", "type": "text" },
+                { "key": "purpose", "value": "1", "type": "text" },
+                { "key": "source_of_income", "value": "1", "type": "text" },
+                { "key": "payment_method", "value": "74", "type": "text" },
+                { "key": "service_level", "value": "1", "type": "text" },
+                { "key": "sms_confirmation", "value": "f", "type": "text" },
+                { "key": "sms_notification", "value": "f", "type": "text" },
+                { "key": "amount_type", "value": "DESTINATION", "type": "text" },
+                { "key": "amount_to_send", "value": "1000", "type": "text" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Persist trans_session_id from XML response so confirmTransaction can use it.",
+                  "const xml = pm.response.text();",
+                  "const m = /<trans_session_id>([^<]+)<\\/trans_session_id>/.exec(xml);",
+                  "if (m) pm.collectionVariables.set('transSessionId', m[1]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /transaction/confirmTransaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/transaction/confirmTransaction", "host": ["{{baseUrl}}"], "path": ["transaction", "confirmTransaction"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "trans_session_id", "value": "{{transSessionId}}", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /transaction/getTransactionStatus",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/transaction/getTransactionStatus", "host": ["{{baseUrl}}"], "path": ["transaction", "getTransactionStatus"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "trans_ref", "value": "{{transRef}}", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /transaction/getTransactionStatusByAgentTransRef",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/transaction/getTransactionStatusByAgentTransRef", "host": ["{{baseUrl}}"], "path": ["transaction", "getTransactionStatusByAgentTransRef"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "trans_ref", "value": "{{agentTransRef}}", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /transaction/getCharges",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/transaction/getCharges", "host": ["{{baseUrl}}"], "path": ["transaction", "getCharges"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "destination_country", "value": "India", "type": "text" },
+                { "key": "trans_type", "value": "Cash Collection", "type": "text" },
+                { "key": "payment_method", "value": "74", "type": "text" },
+                { "key": "service_level", "value": "1", "type": "text" },
+                { "key": "sms_confirmation", "value": "f", "type": "text" },
+                { "key": "sms_notification", "value": "f", "type": "text" },
+                { "key": "amount_type", "value": "DESTINATION", "type": "text" },
+                { "key": "amount_to_send", "value": "100", "type": "text" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delivery",
+      "item": [
+        {
+          "name": "POST /deliveryBank/getDeliveryBanks",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/deliveryBank/getDeliveryBanks", "host": ["{{baseUrl}}"], "path": ["deliveryBank", "getDeliveryBanks"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "dest_country", "value": "India", "type": "text", "disabled": true },
+                { "key": "country_code", "value": "IN", "type": "text" },
+                { "key": "bank_code", "value": "", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /deliveryBankBranch/getDeliveryBankBranches",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/deliveryBankBranch/getDeliveryBankBranches", "host": ["{{baseUrl}}"], "path": ["deliveryBankBranch", "getDeliveryBankBranches"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "delivery_bank", "value": "Test Proc Bank India", "type": "text" },
+                { "key": "destination_country_code", "value": "IN", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /collectionPoint/getCollectionPoints",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/collectionPoint/getCollectionPoints", "host": ["{{baseUrl}}"], "path": ["collectionPoint", "getCollectionPoints"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "delivery_bank", "value": "Test Proc Bank India", "type": "text" },
+                { "key": "destination_country_code", "value": "IN", "type": "text" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mobile",
+      "item": [
+        {
+          "name": "POST /mobileNetworkOperator/getMobileNetworkOperators",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/mobileNetworkOperator/getMobileNetworkOperators", "host": ["{{baseUrl}}"], "path": ["mobileNetworkOperator", "getMobileNetworkOperators"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "country_code", "value": "IN", "type": "text" },
+                { "key": "country_id", "value": "", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /mobileNetworkCreditType/getMobileNetworkCreditTypes",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "url": { "raw": "{{baseUrl}}/mobileNetworkCreditType/getMobileNetworkCreditTypes", "host": ["{{baseUrl}}"], "path": ["mobileNetworkCreditType", "getMobileNetworkCreditTypes"] },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "country_code", "value": "IN", "type": "text" },
+                { "key": "enabled", "value": "true", "type": "text", "disabled": true },
+                { "key": "mobile_network_operator_name", "value": "", "type": "text", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
