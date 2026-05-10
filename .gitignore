@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+logs/
+*.log
+coverage/
+.nyc_output/
+.DS_Store
+*.pem
+*.key
+*.crt
+.idea/
+.vscode/
+dist/
+tmp/
+usi-api.txt

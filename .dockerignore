@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+logs
+coverage
+*.md
+Dockerfile*
+docker-compose*
+usi-api.txt
+*.pdf
