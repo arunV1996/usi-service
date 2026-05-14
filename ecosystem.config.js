@@ -1,10 +1,11 @@
 // PM2 process manager config — alternative to docker cluster mode.
-// Run with: pm2 start ecosystem.config.js --env production
+// Build first:  npm run build
+// Run with:     pm2 start ecosystem.config.js --env production
 module.exports = {
   apps: [
     {
       name: 'usi-payout-service',
-      script: 'src/server.js',
+      script: 'dist/server.js',
       exec_mode: 'cluster',
       instances: 'max',
       max_memory_restart: '512M',

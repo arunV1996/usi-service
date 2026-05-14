@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- build stage ----
-FROM node:20-alpine AS deps
+# ---- build stage: compile TypeScript ----
+FROM node:20-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY package*.json tsconfig.json ./
+RUN npm ci
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
 
 # ---- runtime stage ----
 FROM node:20-alpine AS runtime
@@ -20,12 +22,12 @@ RUN addgroup -S app && adduser -S -G app app \
  && chmod -R 750 /var/log/usi-payout
 
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --chown=app:app src ./src
-COPY --chown=app:app package.json ./
+COPY --from=build --chown=app:app /app/node_modules ./node_modules
+COPY --from=build --chown=app:app /app/dist ./dist
+COPY --from=build --chown=app:app /app/package.json ./
 
 USER app
 EXPOSE 8080
 
-# Use cluster mode by default to saturate CPU per container.
-CMD ["node", "src/cluster.js"]
+# Cluster mode saturates all CPU cores per container.
+CMD ["node", "dist/cluster.js"]
