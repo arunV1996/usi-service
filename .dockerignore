@@ -7,6 +7,8 @@ npm-debug.log
 !.env.example
 logs
 coverage
+dist
+*.tsbuildinfo
 *.md
 Dockerfile*
 docker-compose*

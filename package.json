@@ -3,16 +3,20 @@
   "version": "1.0.0",
   "description": "Secure payout microservice integrating with USI Money (RemitONE) Agent Partner API. Designed for high-concurrency production workloads with AWS KMS / Secrets Manager backed configuration.",
   "private": true,
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "engines": {
     "node": ">=18.18.0"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "start:cluster": "node src/cluster.js",
-    "dev": "NODE_ENV=development nodemon src/server.js",
-    "lint": "eslint \"src/**/*.js\"",
+    "build": "tsc -p tsconfig.json",
+    "prestart": "test -d dist || npm run build",
+    "start": "node dist/server.js",
+    "start:cluster": "node dist/cluster.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\"",
     "test": "jest --runInBand --detectOpenHandles",
+    "clean": "rimraf dist",
     "audit": "npm audit --omit=dev"
   },
   "dependencies": {
@@ -39,9 +43,22 @@
     "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/hpp": "^0.2.6",
+    "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.17.6",
+    "@types/supertest": "^6.0.2",
+    "@types/uuid": "^10.0.0",
     "eslint": "^9.15.0",
     "jest": "^29.7.0",
-    "nodemon": "^3.1.7",
-    "supertest": "^7.0.0"
+    "rimraf": "^6.0.1",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
   }
 }

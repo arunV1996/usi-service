@@ -1,9 +1,9 @@
 # USI Payout Microservice
 
-Secure Node.js / Express microservice that brokers all calls between our
-internal systems and the **USI Money (RemitONE) Agent Partner API**. Internal
-services hit this microservice; the microservice translates, signs, audits and
-proxies the call upstream.
+Secure **TypeScript** / Node.js / Express microservice that brokers all calls
+between our internal systems and the **USI Money (RemitONE) Agent Partner
+API**. Internal services hit this microservice; the microservice translates,
+signs, audits and proxies the call upstream.
 
 This repository ships the code, security controls, and operational tooling
 required for a production deployment that is suitable for **penetration
@@ -15,17 +15,21 @@ testing and SOC audit** at million-user scale.
 
 ```
 src/
-├── app.js               Express app wiring (helmet, cors, hpp, compression)
-├── server.js            Single-process bootstrap + graceful shutdown
-├── cluster.js           Multi-worker bootstrap (saturates all CPU cores)
+├── app.ts               Express app wiring (helmet, cors, hpp, compression)
+├── server.ts            Single-process bootstrap + graceful shutdown
+├── cluster.ts           Multi-worker bootstrap (saturates all CPU cores)
 ├── config/
-│   ├── index.js         Loads & merges secrets/env into a typed config
-│   └── secretManager.js AWS Secrets Manager + KMS helpers (env fallback)
+│   ├── index.ts         Loads & merges secrets/env into a typed config
+│   └── secretManager.ts AWS Secrets Manager + KMS helpers (env fallback)
 ├── controllers/         Thin HTTP handlers, one per USI domain group
 ├── routes/              Express routers + express-validator schemas
 ├── services/usi/        3rd-party HTTP client and per-group wrappers
 ├── middleware/          auth, requestLogger, rateLimit, validate, errorHandler
-└── helpers/             logger, redact, crypto, auditStore
+├── helpers/             logger, redact, crypto, auditStore
+└── types/               Shared types + Express Request augmentation
+
+dist/                    Compiled JS output (created by `npm run build`)
+tsconfig.json            Strict TS config, target ES2022, CommonJS
 ```
 
 Every USI WebService method documented in
@@ -120,7 +124,7 @@ escrowed.
 ```bash
 cp .env.example .env       # fill in USI test creds
 npm ci
-npm run dev                # nodemon, single process
+npm run dev                # tsx watch, hot reload
 ```
 
 Smoke test:
@@ -129,9 +133,35 @@ Smoke test:
 curl -H "x-api-key: $INTERNAL_API_KEY" http://localhost:8080/healthz
 ```
 
+Useful scripts:
+
+| Script | Purpose |
+|---|---|
+| `npm run dev` | Hot-reload (tsx) — runs `src/server.ts` directly, no build needed |
+| `npm run build` | Compile TypeScript → `dist/` (uses `tsconfig.json`) |
+| `npm run typecheck` | Type check only, no emit |
+| `npm start` | Run **production** entry: `node dist/server.js` (runs `build` first if `dist/` missing) |
+| `npm run start:cluster` | Production multi-worker: `node dist/cluster.js` |
+| `npm run clean` | Remove `dist/` and incremental build info |
+
 ---
 
 ## 5. Production deployment
+
+### Bare-metal / VM
+
+```bash
+npm ci --omit=dev=false       # need devDeps to compile
+npm run build                 # produces dist/
+npm prune --omit=dev          # drop devDeps before shipping
+NODE_ENV=production \
+SECRETS_MANAGER_ENABLED=true \
+SECRETS_MANAGER_SECRET_ID=usi-payout-service/prod \
+AWS_REGION=ap-south-1 \
+  node dist/cluster.js
+```
+
+### Docker
 
 ```bash
 docker build -t usi-payout-service:latest .
@@ -146,9 +176,13 @@ docker run -d --name usi-payout \
   usi-payout-service:latest
 ```
 
-The `cluster.js` entrypoint forks one Node worker per CPU core. For multi-host
-horizontal scale, run behind ALB/NLB with auto-scaling and supply
-`REDIS_URL` so rate limiting is enforced cluster-wide.
+The image's multi-stage build compiles TypeScript in the build stage and ships
+only `dist/` + production `node_modules` in the runtime stage.
+
+The `cluster.js` entrypoint (compiled from `cluster.ts`) forks one Node worker
+per CPU core. For multi-host horizontal scale, run behind ALB/NLB with
+auto-scaling and supply `REDIS_URL` so rate limiting is enforced
+cluster-wide.
 
 ### Capacity guidance for 1M users
 
