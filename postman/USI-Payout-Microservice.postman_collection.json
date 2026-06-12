@@ -1,27 +1,24 @@
 {
   "info": {
     "name": "USI Payout Microservice (Internal)",
-    "description": "Postman collection for the internal USI Payout microservice. All endpoints are mounted under /v1 and require authentication (x-api-key OR Bearer JWT). Each request includes a correlation id and returns a uniform { status, data, meta } envelope.\n\nSet the `baseUrl` and `apiKey` collection variables before sending. Use `bearerToken` instead of `apiKey` if you prefer JWT.\n\nMicroservice repo: usi-service",
+    "description": "Postman collection for the internal USI Payout microservice.\n\n## Authentication\n\nThis collection drives the **4-factor strong auth** described in the README:\n  1. `x-api-key`\n  2. a custom secret header (name + value)\n  3. `x-signature` + `x-timestamp` + `x-nonce` (HMAC-SHA256)\n  4. `Idempotency-Key` on payout endpoints\n\nA collection-level **pre-request script** generates all of these automatically before every request, including:\n  - SHA-256 of the (variable-resolved) body\n  - HMAC-SHA256 signature over the canonical string\n  - Fresh timestamp, nonce, correlation id\n  - Idempotency-Key for `POST /v1/transactions/` and `POST /v1/transactions/confirm`\n\n## Setup\n\nSet these collection variables to match ONE entry from your `INTERNAL_CLIENTS` secret:\n  - `baseUrl`             e.g. http://localhost:8080\n  - `apiKey`              x-api-key value for this client\n  - `secretHeaderName`    e.g. x-app-secret-token\n  - `secretHeaderValue`   value for that header\n  - `signingSecret`       HMAC-SHA256 signing key\n\nOptional:\n  - `idempotencyKey`      pin a specific Idempotency-Key (otherwise a fresh UUID is generated per request)\n\n⚠️ Do NOT commit a Postman environment file containing production secrets.\n\n## Endpoints\n\nAll business endpoints are mounted under `/v1`. createTransaction's test script captures `trans_session_id` into the collection variable so the next `confirmTransaction` call just works.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_postman_id": "9d1f2c0e-1a4a-4f8a-9bd0-000000000001"
   },
-  "auth": {
-    "type": "apikey",
-    "apikey": [
-      { "key": "key", "value": "x-api-key", "type": "string" },
-      { "key": "value", "value": "{{apiKey}}", "type": "string" },
-      { "key": "in", "value": "header", "type": "string" }
-    ]
-  },
+  "auth": { "type": "noauth" },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
-    { "key": "apiKey", "value": "replace-with-internal-api-key", "type": "string" },
-    { "key": "bearerToken", "value": "", "type": "string" },
+    { "key": "apiKey", "value": "ak_live_REPLACE_ME", "type": "string" },
+    { "key": "secretHeaderName", "value": "x-app-secret-token", "type": "string" },
+    { "key": "secretHeaderValue", "value": "sv_live_REPLACE_ME", "type": "string" },
+    { "key": "signingSecret", "value": "sk_live_REPLACE_ME", "type": "string" },
+    { "key": "idempotencyKey", "value": "", "type": "string", "description": "Optional. If empty, a fresh UUID is generated for every payout request." },
     { "key": "remitterId", "value": "10005", "type": "string" },
     { "key": "beneficiaryId", "value": "11", "type": "string" },
     { "key": "transRef", "value": "RA000263000102", "type": "string" },
     { "key": "agentTransRef", "value": "AGT-TEST-001", "type": "string" },
-    { "key": "transSessionId", "value": "830016270356710161", "type": "string" }
+    { "key": "transSessionId", "value": "830016270356710161", "type": "string" },
+    { "key": "auditId", "value": "", "type": "string" }
   ],
   "event": [
     {
@@ -29,10 +26,125 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "// Auto-generate a correlation id for every request unless caller set one.",
+          "// =======================================================================",
+          "// USI Payout Microservice — Strong-auth signer",
+          "// Mirrors src/middleware/auth.ts on the server.",
+          "// =======================================================================",
+          "",
+          "const url = pm.request.url;",
+          "let pathOnly;",
+          "try {",
+          "  pathOnly = new URL(pm.variables.replaceIn(url.toString())).pathname;",
+          "} catch (e) {",
+          "  pathOnly = '/' + ((url.path || []).map((s) => pm.variables.replaceIn(s)).join('/'));",
+          "}",
+          "",
+          "// Skip auth on public endpoints (healthz, readyz). Their requests already set auth: noauth.",
+          "if (pathOnly === '/healthz' || pathOnly === '/readyz') {",
+          "  if (!pm.request.headers.has('x-correlation-id')) {",
+          "    pm.request.headers.add({ key: 'x-correlation-id', value: 'pm-' + Date.now().toString(36) });",
+          "  }",
+          "  return;",
+          "}",
+          "",
+          "const apiKey            = pm.collectionVariables.get('apiKey');",
+          "const secretHeaderName  = (pm.collectionVariables.get('secretHeaderName') || '').toLowerCase();",
+          "const secretHeaderValue = pm.collectionVariables.get('secretHeaderValue');",
+          "const signingSecret     = pm.collectionVariables.get('signingSecret');",
+          "",
+          "if (!apiKey || !secretHeaderName || !secretHeaderValue || !signingSecret) {",
+          "  console.warn('[strong-auth] One or more of apiKey / secretHeaderName / secretHeaderValue / signingSecret is unset. Set them in the collection Variables tab.');",
+          "  return;",
+          "}",
+          "",
+          "// ---- helpers -----------------------------------------------------------",
+          "function setHeader(name, value) {",
+          "  const lower = name.toLowerCase();",
+          "  const existing = pm.request.headers.find((h) => h && h.key && h.key.toLowerCase() === lower);",
+          "  if (existing) existing.value = String(value);",
+          "  else pm.request.headers.add({ key: name, value: String(value) });",
+          "}",
+          "",
+          "// ---- 1. resolve body (with {{vars}} substituted) -----------------------",
+          "let bodyStr = '';",
+          "if (pm.request.body && pm.request.body.mode === 'raw' && pm.request.body.raw) {",
+          "  bodyStr = pm.variables.replaceIn(pm.request.body.raw);",
+          "} else if (pm.request.body && pm.request.body.mode === 'urlencoded') {",
+          "  // Build the form-encoded body the same way Postman would send it.",
+          "  const parts = [];",
+          "  pm.request.body.urlencoded.each((f) => {",
+          "    if (f.disabled || !f.key) return;",
+          "    parts.push(encodeURIComponent(pm.variables.replaceIn(f.key)) + '=' + encodeURIComponent(pm.variables.replaceIn(f.value || '')));",
+          "  });",
+          "  bodyStr = parts.join('&');",
+          "}",
+          "",
+          "// ---- 2. sorted query (key=value pairs, lexicographically sorted) -------",
+          "const queryItems = (url.query && url.query.all ? url.query.all() : [])",
+          "  .filter((q) => q && !q.disabled && q.key)",
+          "  .map((q) => pm.variables.replaceIn(q.key) + '=' + pm.variables.replaceIn(q.value || ''))",
+          "  .sort();",
+          "const sortedQuery = queryItems.join('&');",
+          "",
+          "// ---- 3. SHA-256 of body ------------------------------------------------",
+          "const bodyHash = CryptoJS.SHA256(bodyStr).toString(CryptoJS.enc.Hex);",
+          "",
+          "// ---- 4. timestamp + nonce ---------------------------------------------",
+          "const ts = String(Date.now());",
+          "const nonce = 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 14);",
+          "",
+          "// ---- 5. canonical string + HMAC ---------------------------------------",
+          "const method = pm.request.method.toUpperCase();",
+          "const canonical = [method, pathOnly, sortedQuery, bodyHash, ts, nonce].join('\\n');",
+          "const signature = CryptoJS.HmacSHA256(canonical, signingSecret).toString(CryptoJS.enc.Hex);",
+          "",
+          "// ---- 6. set auth headers ----------------------------------------------",
+          "setHeader('x-api-key',       apiKey);",
+          "setHeader(secretHeaderName,  secretHeaderValue);",
+          "setHeader('x-timestamp',     ts);",
+          "setHeader('x-nonce',         nonce);",
+          "setHeader('x-signature',     signature);",
+          "",
+          "// ---- 7. correlation id -------------------------------------------------",
           "if (!pm.request.headers.has('x-correlation-id')) {",
-          "  pm.request.headers.add({ key: 'x-correlation-id', value: 'pm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) });",
-          "}"
+          "  setHeader('x-correlation-id', 'pm-' + Date.now().toString(36));",
+          "}",
+          "",
+          "// ---- 8. Idempotency-Key for payout endpoints ---------------------------",
+          "// Server requires it for POST /v1/transactions/ and POST /v1/transactions/confirm.",
+          "const PAYOUT_PATHS = ['/v1/transactions', '/v1/transactions/', '/v1/transactions/confirm'];",
+          "const stripTrailing = pathOnly.replace(/\\/+$/, '');",
+          "if (method === 'POST' && PAYOUT_PATHS.indexOf(pathOnly) !== -1) {",
+          "  if (!pm.request.headers.has('idempotency-key')) {",
+          "    const fixed = pm.collectionVariables.get('idempotencyKey');",
+          "    let key = fixed && fixed.length >= 8 ? fixed : null;",
+          "    if (!key) {",
+          "      try {",
+          "        key = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null;",
+          "      } catch (e) { key = null; }",
+          "      if (!key) key = 'idem-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 14);",
+          "    }",
+          "    setHeader('Idempotency-Key', key);",
+          "  }",
+          "}",
+          "",
+          "// ---- 9. debug (uncomment if you need to inspect the signing payload) ----",
+          "// console.log('canonical:\\n' + canonical);",
+          "// console.log('signature: ' + signature);"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Capture audit_id from any successful response so the next Audit request can use it.",
+          "try {",
+          "  const j = pm.response.json();",
+          "  if (j && j.meta && j.meta.audit_id) pm.collectionVariables.set('auditId', j.meta.audit_id);",
+          "  if (j && j.error && j.error.audit_id) pm.collectionVariables.set('auditId', j.error.audit_id);",
+          "} catch (_) { /* non-JSON responses */ }"
         ]
       }
     }
@@ -227,18 +339,19 @@
       ]
     },
     {
-      "name": "Transaction",
+      "name": "Transaction (PAYOUT — Idempotency-Key required)",
       "item": [
         {
-          "name": "POST /v1/transactions (create)",
+          "name": "POST /v1/transactions/ (createTransaction — idempotent)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "url": { "raw": "{{baseUrl}}/v1/transactions", "host": ["{{baseUrl}}"], "path": ["v1", "transactions"] },
+            "url": { "raw": "{{baseUrl}}/v1/transactions/", "host": ["{{baseUrl}}"], "path": ["v1", "transactions", ""] },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"remitter_id\": 10005,\n  \"beneficiary_id\": 11,\n  \"destination_country\": \"India\",\n  \"agent_trans_ref\": \"{{agentTransRef}}\",\n  \"trans_type\": \"Cash Collection\",\n  \"purpose\": \"1\",\n  \"source_of_income\": \"1\",\n  \"payment_method\": \"74\",\n  \"service_level\": \"1\",\n  \"sms_confirmation\": \"f\",\n  \"sms_notification\": \"f\",\n  \"amount_type\": \"DESTINATION\",\n  \"amount_to_send\": 1000\n}"
-            }
+            },
+            "description": "Mounted at `/v1/transactions/` with a trailing slash so the path matches what the server expects for idempotency.\n\nThe collection-level pre-request script:\n  - signs the request with HMAC-SHA256\n  - generates a fresh Idempotency-Key (UUID) unless `idempotencyKey` is pinned\n\nThe per-request test script captures `trans_session_id` so the next `confirmTransaction` call just works."
           },
           "event": [
             {
@@ -246,19 +359,25 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (pm.response.code === 200) {",
+                  "// Persist trans_session_id and audit_id for subsequent calls.",
+                  "try {",
                   "  const j = pm.response.json();",
                   "  if (j && j.data && j.data.trans_session_id) {",
                   "    pm.collectionVariables.set('transSessionId', j.data.trans_session_id);",
                   "  }",
-                  "}"
+                  "  const audit = (j && j.meta && j.meta.audit_id) || (j && j.error && j.error.audit_id);",
+                  "  if (audit) pm.collectionVariables.set('auditId', audit);",
+                  "  if (pm.response.headers && pm.response.headers.get('x-idempotent-replay') === 'true') {",
+                  "    console.log('[idempotency] replayed cached response (stored at ' + pm.response.headers.get('x-idempotent-stored-at') + ')');",
+                  "  }",
+                  "} catch (_) { /* non-JSON */ }"
                 ]
               }
             }
           ]
         },
         {
-          "name": "POST /v1/transactions/confirm",
+          "name": "POST /v1/transactions/confirm (confirmTransaction — idempotent)",
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
@@ -266,7 +385,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"trans_session_id\": \"{{transSessionId}}\"\n}"
-            }
+            },
+            "description": "Idempotency-Key is auto-generated unless pinned via the `idempotencyKey` collection variable.\n\nReplay rules (server-side):\n  - Same key + same body → cached response replayed, header `x-idempotent-replay: true`\n  - Same key + different body → 422 IDEMPOTENCY_CONFLICT\n  - In-flight key → 409 IDEMPOTENCY_IN_PROGRESS\n  - 5xx responses are NOT cached"
           }
         },
         {
