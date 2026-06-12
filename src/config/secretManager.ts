@@ -7,6 +7,8 @@ import { KMSClient, DecryptCommand } from '@aws-sdk/client-kms';
 export const SECRET_KEYS = [
   'INTERNAL_JWT_SECRET',
   'INTERNAL_API_KEYS',
+  // Strong-auth client roster — JSON array of InternalClient objects.
+  'INTERNAL_CLIENTS',
   'USI_BASE_URL',
   'USI_USERNAME',
   'USI_PASSWORD',

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import path from 'path';
 import { loadAll, getSecret } from './secretManager';
-import type { AppConfig } from '../types';
+import type { AppConfig, InternalClient } from '../types';
 
 function intEnv(name: string, fallback: number): number {
   const v = process.env[name];
@@ -16,6 +16,35 @@ function boolEnv(name: string, fallback = false): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
 }
 
+function parseClients(raw: string | undefined): InternalClient[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('INTERNAL_CLIENTS is not valid JSON');
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('INTERNAL_CLIENTS must be a JSON array of client objects');
+  }
+  return (parsed as Array<Record<string, unknown>>).map((c, i) => {
+    const fields = ['clientId', 'apiKey', 'secretHeaderName', 'secretHeaderValue', 'signingSecret'];
+    for (const f of fields) {
+      if (typeof c[f] !== 'string' || (c[f] as string).length === 0) {
+        throw new Error(`INTERNAL_CLIENTS[${i}].${f} is missing or empty`);
+      }
+    }
+    return {
+      clientId: c['clientId'] as string,
+      apiKey: c['apiKey'] as string,
+      secretHeaderName: (c['secretHeaderName'] as string).toLowerCase(),
+      secretHeaderValue: c['secretHeaderValue'] as string,
+      signingSecret: c['signingSecret'] as string,
+      scopes: Array.isArray(c['scopes']) ? (c['scopes'] as string[]) : undefined,
+    };
+  });
+}
+
 let resolved: AppConfig | null = null;
 
 export async function build(): Promise<AppConfig> {
@@ -25,6 +54,7 @@ export async function build(): Promise<AppConfig> {
   const [
     internalJwtSecret,
     internalApiKeysRaw,
+    internalClientsRaw,
     usiBaseUrl,
     usiUsername,
     usiPassword,
@@ -34,6 +64,7 @@ export async function build(): Promise<AppConfig> {
   ] = await Promise.all([
     getSecret('INTERNAL_JWT_SECRET'),
     getSecret('INTERNAL_API_KEYS'),
+    getSecret('INTERNAL_CLIENTS'),
     getSecret('USI_BASE_URL'),
     getSecret('USI_USERNAME'),
     getSecret('USI_PASSWORD'),
@@ -44,10 +75,11 @@ export async function build(): Promise<AppConfig> {
 
   const env = process.env.NODE_ENV || 'development';
   const isProd = env === 'production';
+  const clients = parseClients(internalClientsRaw);
+  const strictAuth = boolEnv('STRICT_AUTH', isProd) || clients.length > 0;
 
   if (isProd) {
     const required: Record<string, string | undefined> = {
-      internalJwtSecret,
       usiBaseUrl,
       usiUsername,
       usiPassword,
@@ -55,6 +87,9 @@ export async function build(): Promise<AppConfig> {
     };
     for (const [k, v] of Object.entries(required)) {
       if (!v) throw new Error(`Missing required production secret: ${k}`);
+    }
+    if (clients.length === 0) {
+      throw new Error('INTERNAL_CLIENTS must define at least one client in production');
     }
   }
 
@@ -82,12 +117,24 @@ export async function build(): Promise<AppConfig> {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
+      clients,
+      signatureSkewSec: intEnv('SIGNATURE_SKEW_SEC', 300),
+      nonceTtlSec: intEnv('NONCE_TTL_SEC', 900),
+      strict: strictAuth,
     },
 
     rateLimit: {
       windowMs: intEnv('RATE_LIMIT_WINDOW_MS', 60_000),
       max: intEnv('RATE_LIMIT_MAX', 300),
-      redisUrl: process.env.REDIS_URL || null,
+    },
+
+    redis: {
+      url: process.env.REDIS_URL || null,
+    },
+
+    idempotency: {
+      ttlSec: intEnv('IDEMPOTENCY_TTL_SEC', 24 * 60 * 60),
+      lockTtlSec: intEnv('IDEMPOTENCY_LOCK_TTL_SEC', 5 * 60),
     },
 
     usi: {
