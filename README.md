@@ -65,7 +65,7 @@ fail (fail-closed).
 
 | Control | Implementation |
 |---|---|
-| Authentication | **4-factor strong auth** in production (see §3.1) — `src/middleware/auth.ts` |
+| Authentication | **4-factor strong auth** in production (see §3.1) — `src/middleware/auth.ts`. `/v1/audit/*` uses a lighter api-key-only check (`src/middleware/auditAuth.ts`). |
 | Idempotency | `Idempotency-Key` required for payout endpoints, 24 h Redis cache — `src/middleware/idempotency.ts` |
 | Authorization scope | Internal-network only; deploy in private subnet behind ALB + WAF |
 | TLS to upstream | `rejectUnauthorized: true`, `minVersion: TLSv1.2` (`httpClient.js`) |
@@ -85,10 +85,17 @@ fail (fail-closed).
 
 ### 3.1 Strong authentication (production)
 
-Every `/v1/*` request must carry **four** independent factors. All four are
-verified before any business logic runs. Failure of any single factor returns
-`401 UNAUTHORIZED` with a generic message (diagnostic detail is logged
-server-side only):
+Every `/v1/*` request **except `/v1/audit/*`** must carry **four** independent
+factors. All four are verified before any business logic runs. Failure of any
+single factor returns `401 UNAUTHORIZED` with a generic message (diagnostic
+detail is logged server-side only).
+
+> **Exception — `/v1/audit/*`:** The read-only external-call inspection
+> endpoints accept just `x-api-key` (timing-safe match against any
+> `INTERNAL_CLIENTS[].apiKey`). No signature, no nonce, no secret-header.
+> This lets operators inspect upstream call records with a simple curl while
+> the rest of the API keeps the full 4-factor flow. See
+> `src/middleware/auditAuth.ts`.
 
 | # | Factor | Header | Source |
 |---|---|---|---|

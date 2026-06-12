@@ -58,6 +58,14 @@ variables — one per `INTERNAL_CLIENTS` entry on the server.
 Health endpoints (`/healthz`, `/readyz`) skip the auth machinery —
 the script returns early for them.
 
+**Audit endpoints (`/v1/audit/*`) only need `x-api-key`** — the script also
+returns early after setting just the api-key + correlation id. No signature,
+no nonce, no secret-header. This makes shell-based log inspection trivial:
+
+```bash
+curl "$BASE/v1/audit/external-calls/$AUDIT_ID" -H "x-api-key: $API_KEY"
+```
+
 ### Exercising idempotency replays
 
 To trigger a deliberate **replay**:
