@@ -5,6 +5,8 @@ declare global {
     interface Request {
       correlationId: string;
       auth?: AuthContext;
+      /** Raw request body bytes — captured by the body parser for signature verification. */
+      rawBody?: Buffer;
     }
   }
 }

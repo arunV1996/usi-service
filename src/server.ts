@@ -1,18 +1,26 @@
 import { build as buildConfig } from './config';
 import * as loggerHelper from './helpers/logger';
 import * as auditStore from './helpers/auditStore';
+import * as kvStore from './helpers/kvStore';
 import * as usiClient from './services/usi/httpClient';
 import { buildApp } from './app';
-import { shutdown as shutdownRateLimit } from './middleware/rateLimit';
 
 export async function start(): Promise<void> {
   const cfg = await buildConfig();
   loggerHelper.build(cfg);
   auditStore.init(cfg);
+  await kvStore.init(cfg);
   usiClient.build(cfg);
 
-  const app = await buildApp(cfg);
+  const app = buildApp(cfg);
   const log = loggerHelper.get();
+
+  if (!cfg.redis.url && cfg.auth.strict) {
+    log.warn('redis_not_configured_strict_auth', {
+      message:
+        'STRICT_AUTH is on but REDIS_URL is unset. Nonce replay protection and idempotency are using an in-process memory fallback — only safe for single-process dev.',
+    });
+  }
 
   const server = app.listen(cfg.port, cfg.host, () => {
     log.info('server_started', {
@@ -20,6 +28,8 @@ export async function start(): Promise<void> {
       host: cfg.host,
       port: cfg.port,
       env: cfg.env,
+      auth_mode: cfg.auth.strict ? 'strong' : 'legacy',
+      kv_backend: kvStore.backend(),
     });
   });
 
@@ -30,7 +40,7 @@ export async function start(): Promise<void> {
     log.info('server_shutdown', { signal });
     server.close(async () => {
       try {
-        await shutdownRateLimit();
+        await kvStore.shutdown();
       } catch {
         /* noop */
       }

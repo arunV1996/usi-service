@@ -65,7 +65,8 @@ fail (fail-closed).
 
 | Control | Implementation |
 |---|---|
-| Authentication | Bearer JWT (HS256) **or** `x-api-key` (timing-safe compare) — `src/middleware/auth.js` |
+| Authentication | **4-factor strong auth** in production (see §3.1) — `src/middleware/auth.ts` |
+| Idempotency | `Idempotency-Key` required for payout endpoints, 24 h Redis cache — `src/middleware/idempotency.ts` |
 | Authorization scope | Internal-network only; deploy in private subnet behind ALB + WAF |
 | TLS to upstream | `rejectUnauthorized: true`, `minVersion: TLSv1.2` (`httpClient.js`) |
 | Security headers | `helmet` with HSTS, no-referrer, COEP defaults |
@@ -81,6 +82,95 @@ fail (fail-closed).
 | Process hardening | Runs as non-root in container; `x-powered-by` disabled; `etag` disabled |
 | Error responses | Internal stack traces never returned; only `correlation_id` |
 | Graceful shutdown | SIGTERM/SIGINT handled; 30 s grace period |
+
+### 3.1 Strong authentication (production)
+
+Every `/v1/*` request must carry **four** independent factors. All four are
+verified before any business logic runs. Failure of any single factor returns
+`401 UNAUTHORIZED` with a generic message (diagnostic detail is logged
+server-side only):
+
+| # | Factor | Header | Source |
+|---|---|---|---|
+| 1 | API key (client identity) | `x-api-key` | per-client, from `INTERNAL_CLIENTS` |
+| 2 | Shared secret header (name + value) | configurable, e.g. `x-app-secret-token` | per-client; **both** the header name and value live in Secrets Manager |
+| 3 | HMAC-SHA256 signature | `x-signature`, `x-timestamp`, `x-nonce` | computed by caller with per-client `signingSecret` |
+| 4 | Idempotency-Key (payout endpoints only) | `Idempotency-Key` | caller-generated UUID; 24 h cache in Redis |
+
+Clients are defined in the `INTERNAL_CLIENTS` secret as a JSON array:
+
+```json
+[
+  {
+    "clientId":          "ledger-service",
+    "apiKey":            "ak_live_...",
+    "secretHeaderName":  "x-app-secret-token",
+    "secretHeaderValue": "sv_live_...",
+    "signingSecret":     "hmac_signing_key_...",
+    "scopes":            ["payout", "read"]
+  }
+]
+```
+
+#### Signature canonicalisation
+
+```
+HMAC_SHA256(
+  signingSecret,
+  METHOD + "\n" +
+  PATH + "\n" +
+  SORTED_QUERY + "\n" +
+  SHA256_HEX(BODY) + "\n" +
+  TIMESTAMP_MS + "\n" +
+  NONCE
+)
+```
+
+- `METHOD` upper-cased, `PATH` is the URL path without query.
+- `SORTED_QUERY` is the raw query string with `k=v` pairs sorted lexically.
+- `BODY` is the raw request body bytes (empty string for GET).
+- `TIMESTAMP_MS` must be within ±`SIGNATURE_SKEW_SEC` (default 300 s) of server time.
+- `NONCE` is unique per request; reuse within `NONCE_TTL_SEC` (default 900 s) returns 401.
+
+Replay protection uses a SET-NX in Redis (`nonce:<clientId>:<nonce>`).
+
+#### Idempotency for payout endpoints
+
+`POST /v1/transactions` (createTransaction) and `POST /v1/transactions/confirm`
+(confirmTransaction) require an `Idempotency-Key` header (8–128 chars of
+`[A-Za-z0-9._-]`). Behaviour:
+
+| Scenario | Response |
+|---|---|
+| First call with key + body B | Processed normally; 2xx/4xx response cached for `IDEMPOTENCY_TTL_SEC` (default 24 h) |
+| Repeat with key + body B before first finishes | `409 IDEMPOTENCY_IN_PROGRESS` |
+| Repeat with key + body B after first finishes | Cached response replayed verbatim, `x-idempotent-replay: true` header added |
+| Repeat with key but body C (different fingerprint) | `422 IDEMPOTENCY_CONFLICT` |
+| First call returned 5xx | **Not cached**; lock released so the client may retry |
+
+Keys are namespaced per `clientId` so two clients cannot interfere with each
+other's keys (`idem:<clientId>:<key>`).
+
+#### Sample call
+
+```bash
+TS=$(date +%s%3N)
+NONCE=$(uuidgen)
+BODY='{"remitter_id":1,"beneficiary_id":1, ...}'
+BODY_HASH=$(printf '%s' "$BODY" | openssl dgst -sha256 -hex | awk '{print $2}')
+CANON="POST\n/v1/transactions/\n\n$BODY_HASH\n$TS\n$NONCE"
+SIG=$(printf '%b' "$CANON" | openssl dgst -sha256 -hmac "$SIGNING_SECRET" -hex | awk '{print $2}')
+
+curl -X POST https://api/v1/transactions/ \
+  -H "x-api-key: $API_KEY" \
+  -H "x-app-secret-token: $SECRET_VALUE" \
+  -H "x-timestamp: $TS" \
+  -H "x-nonce: $NONCE" \
+  -H "x-signature: $SIG" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  --data "$BODY"
+```
 
 ### What is logged vs what is not
 
