@@ -7,8 +7,10 @@ import beneficiaryRoutes from './beneficiaryRoutes';
 import transactionRoutes from './transactionRoutes';
 import deliveryRoutes from './deliveryRoutes';
 import mobileRoutes from './mobileRoutes';
-import auditRoutes from './auditRoutes';
 
+// Note: auditRoutes are intentionally NOT mounted here. They are mounted
+// directly in src/app.ts with a lighter `auditAuth` middleware (api-key only),
+// so this router only contains routes that require the full 4-factor flow.
 const router = Router();
 
 router.use('/agent', agentRoutes);
@@ -19,6 +21,5 @@ router.use('/beneficiaries', beneficiaryRoutes);
 router.use('/transactions', transactionRoutes);
 router.use('/delivery', deliveryRoutes);
 router.use('/mobile', mobileRoutes);
-router.use('/audit', auditRoutes);
 
 export default router;
