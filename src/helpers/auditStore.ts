@@ -16,7 +16,19 @@ let _cfg: AppConfig | null = null;
 
 export function init(cfg: AppConfig): void {
   _cfg = cfg;
-  fs.mkdirSync(cfg.logging.auditDir, { recursive: true, mode: 0o750 });
+  try {
+    fs.mkdirSync(cfg.logging.auditDir, { recursive: true, mode: 0o750 });
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      throw new Error(
+        `Cannot create audit log directory "${cfg.logging.auditDir}" (${e.code}). ` +
+          `Set AUDIT_LOG_DIR to a directory the process can write to, ` +
+          `or pre-create it: sudo mkdir -p "${cfg.logging.auditDir}" && sudo chown -R $(id -u):$(id -g) "${cfg.logging.auditDir}".`,
+      );
+    }
+    throw err;
+  }
 }
 
 function fileFor(date: Date = new Date()): string {
