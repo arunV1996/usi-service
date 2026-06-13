@@ -8,7 +8,20 @@ import type { AppConfig } from '../types';
 let _logger: Logger | null = null;
 
 function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === 'EACCES' || e.code === 'EPERM') {
+      throw new Error(
+        `Cannot create log directory "${dir}" (${e.code}). ` +
+          `Either point LOG_DIR / AUDIT_LOG_DIR at a directory the process can write to, ` +
+          `or pre-create the directory with the right ownership ` +
+          `(e.g. sudo mkdir -p "${dir}" && sudo chown -R $(id -u):$(id -g) "${dir}").`,
+      );
+    }
+    throw err;
+  }
 }
 
 export function build(cfg: AppConfig): Logger {
